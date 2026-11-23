@@ -1,0 +1,48 @@
+name: reactos-0.4.16-install
+
+# INSTALL REACTOS ONTO A DISK THIS STAGE MAKES, AND PUBLISH IT.
+#
+# THIS IS THE FIRST STAGE, SO IT HAS NO `pull:`: the disk is created by the walkthrough's `disk:` step
+# and the medium arrives from this repository's ghcr package as `assets:`.
+#
+# THE INSTALLER IMAGE IS MIRRORED, NOT FETCHED FROM THE PUBLISHER. `artifacts-publish.yml` puts it in
+# the package once, with its digest checked; a stage asks the package and nothing upstream.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disks_repository:
+        description: "the ghcr repository that holds the disks and media"
+        default: "easydev-org/easyvm-reactos"
+
+concurrency:
+  group: reactos-0.4.16-install
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  checks: write
+
+jobs:
+  install:
+    uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.3-dev
+    secrets: inherit
+    with:
+      image_repository: easydev-org/easyvm
+      image_tag: v0.0.3-dev
+      disk_gb: "20"
+      group: reactos-0.4.16-install
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "reactos-install",
+            "file": "reactos/steps/install.walk",
+            "pull": "",
+            "assets": ["iso-reactos-0.4.16:ReactOS-0.4.16-i386.zip.tar"],
+            "out": "reactos-install.qcow2",
+            "publish": "reactos-install",
+            "timeout": 90
+          }
+        ]

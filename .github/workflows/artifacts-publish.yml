@@ -1,0 +1,160 @@
+name: artifacts-publish
+
+# MIRROR EVERY INPUT THIS REPOSITORY'S GUESTS BOOT FROM, INTO THIS REPOSITORY'S OWN ghcr PACKAGE.
+#
+# A stage pulls its media from a ghcr tag and nothing else, so a file that only exists upstream cannot
+# be booted by a leg. This job downloads each pinned URL once, checks it against the digest written
+# beside it, packs it into a tar and pushes one tag - and every stage afterwards asks the package.
+#
+# THE PACK IS NOT DECORATION. A leg has one way to prepare its work directory: pull the named
+# artifact, unpack it, delete the archive. That is what removed `fetch:` from the engine - nothing in
+# a walkthrough knows how to prepare a file any more.
+#
+# A FILE THAT IS NOT THE ONE THAT WAS PINNED IS A REFUSED PUSH, not a warning. The whole point of
+# pinning a digest is that the thing booted next week is the thing measured this week.
+
+on:
+  workflow_dispatch:
+    inputs:
+      group:
+        description: "Which group to publish"
+        type: choice
+        options:
+          - all
+          - others
+        default: all
+      disks_repository:
+        description: >-
+          The ghcr package the pinned inputs are MIRRORED INTO. Empty means THIS repository, which
+          is what every caller wants: a token can only write to the package its own repository holds.
+        default: ""
+      which:
+        description: "One exact tag, overriding `group`. Empty publishes the whole group."
+        default: ""
+      keep:
+        description: "Keep the downloaded files on the runner"
+        type: boolean
+        default: false
+
+concurrency:
+  group: artifacts-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact:
+          - { tag: "iso-reactos-0.4.16", group: "others", url: "https://downloads.sourceforge.net/project/reactos/ReactOS/0.4.16/ReactOS-0.4.16-i386.zip", sha: "", size: "198087895" }
+    # NO `if:` HERE, AND THAT IS NOT AN OVERSIGHT: A JOB-LEVEL `if:` CANNOT SEE `matrix`.
+    #
+    # GitHub evaluates a job's `if:` before the matrix is expanded, so `matrix.artifact.tag` is empty
+    # there and the condition silently reads as false for every row - a run with zero jobs and no log
+    # line. MEASURED, and it is what the repository's own workflow test refuses.
+    #
+    # SELECTION GOES IN THE MATRIX INSTEAD, which IS evaluated per row. A re-run of one artifact is:
+    #
+    #	gh workflow run artifacts-publish.yml -f which=iso-haiku-r1beta5
+    steps:
+      - uses: actions/checkout@v4
+
+      # A ROW THAT WAS NOT ASKED FOR EXITS BEFORE IT DOWNLOADS ANYTHING.
+      - name: is this row wanted
+        id: wanted
+        env:
+          WHICH: ${{ inputs.which }}
+          GROUP_INPUT: ${{ inputs.group }}
+          ROW_TAG: ${{ matrix.artifact.tag }}
+          ROW_GROUP: ${{ matrix.artifact.group }}
+        run: |
+          set -eu
+          if [ -n "${WHICH:-}" ]; then
+            if [ "$ROW_TAG" = "$WHICH" ]; then
+              echo "wanted=yes" >> "$GITHUB_OUTPUT"
+            else
+              echo "wanted=no" >> "$GITHUB_OUTPUT"
+              echo "skipped: asked for $WHICH, this row is $ROW_TAG"
+            fi
+            exit 0
+          fi
+          if [ "${GROUP_INPUT:-all}" = "all" ] || [ "$ROW_GROUP" = "$GROUP_INPUT" ]; then
+            echo "wanted=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "wanted=no" >> "$GITHUB_OUTPUT"
+            echo "skipped: asked for group $GROUP_INPUT, this row is $ROW_TAG"
+          fi
+
+      - name: prepare the runner
+        if: steps.wanted.outputs.wanted == 'yes'
+        uses: easydev-org/easyactions/runner-check@main
+        with:
+          kvm: false
+          disk-gb: '15'
+          token: ${{ github.token }}
+
+      - name: download and verify
+        if: steps.wanted.outputs.wanted == 'yes'
+        id: fetch
+        env:
+          URL: ${{ matrix.artifact.url }}
+          SHA: ${{ matrix.artifact.sha }}
+          SIZE: ${{ matrix.artifact.size }}
+        run: |
+          set -eu
+          mkdir -p "$GITHUB_WORKSPACE/work"
+          name=$(basename "$URL")
+          dest="$GITHUB_WORKSPACE/work/$name"
+          echo "=== $name"
+          curl -fL --retry 8 --retry-delay 3 --retry-all-errors -o "$dest" "$URL"
+
+          # THE DIGEST IS CHECKED WHEN THE PUBLISHER GIVES ONE. ReactOS ships its installer inside a
+          # SourceForge zip whose digest is not exposed as a sibling file, and the row says so with
+          # an empty `sha:` rather than a value somebody typed.
+          if [ -n "$SHA" ]; then
+            echo "$SHA  $dest" | sha256sum -c -
+          else
+            echo "no pinned digest for $name; the size is the only check"
+          fi
+
+          if [ "$SIZE" != "0" ]; then
+            got=$(stat -c %s "$dest")
+            [ "$got" = "$SIZE" ] || {
+              echo "::error::$name is $got bytes; the catalogue says $SIZE"
+              exit 1
+            }
+          fi
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: pack into a tar
+        if: steps.wanted.outputs.wanted == 'yes'
+        # EVERY PUBLISHED ASSET IS ONE TAR, AND THIS IS WHERE THAT STARTS.
+        run: |
+          set -eu
+          src="${{ steps.fetch.outputs.path }}"
+          dir=$(dirname "$src")
+          base=$(basename "$src")
+          case "$base" in
+            *.tar) echo "already a tar: $src" ;;
+            *)
+              tar -cf "$dir/$base.tar" -C "$dir" "$base"
+              rm -f "$src"
+              echo "path=$dir/$base.tar" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+        id: pack
+
+      - name: push
+        if: steps.wanted.outputs.wanted == 'yes'
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: ${{ steps.pack.outputs.path }}
+          tag: ${{ matrix.artifact.tag }}
+          repository: ${{ inputs.disks_repository || github.repository }}
+          token: ${{ github.token }}

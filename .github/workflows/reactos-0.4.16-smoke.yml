@@ -1,0 +1,52 @@
+name: reactos-0.4.16-smoke
+
+# DOES THE PUBLISHED DISK START? Boot it, record three minutes, kill it.
+#
+# THIS IS THE CLAIM THE INSTALL LEG CANNOT MAKE. A walkthrough can answer every one of its steps and
+# still publish a disk no firmware will boot - MEASURED on android blissos 16.9.7, whose install ended
+# with "Congratulations!" and whose disk printed "BdsDxe: No bootable option or device was found."
+#
+# IT PUBLISHES NO DISK. `out:` is empty, so stage.yml reports "no disk to publish (the stage may not
+# write one)" and the only artifact is the recording. The disk it verifies is the one the install leg
+# already published, so this is safe to run at any time.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_tag:
+        description: >-
+          the PUBLISHED disk to boot. Empty uses the tag this repository's install leg publishes.
+        default: "reactos-install"
+      disks_repository:
+        description: "the ghcr repository that holds the disk"
+        default: "easydev-org/easyvm-reactos"
+
+concurrency:
+  group: reactos-0.4.16-smoke
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  checks: write
+
+jobs:
+  smoke:
+    uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.3-dev
+    secrets: inherit
+    with:
+      image_repository: easydev-org/easyvm
+      image_tag: v0.0.3-dev
+      disk_gb: "20"
+      group: reactos-0.4.16-smoke
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "reactos-smoke",
+            "file": "reactos/steps/smoke.walk",
+            "pull": "${{ inputs.from_tag }}",
+            "out": "",
+            "timeout": 20
+          }
+        ]
