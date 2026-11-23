@@ -1,0 +1,44 @@
+# DOES THE PUBLISHED DISK START? Boot it, look, and kill it - nothing else.
+#
+# "THE INSTALL LEG PASSED" IS NOT THE SAME CLAIM. An install can answer every one of its steps and
+# still publish a disk no firmware will boot, so this file asks only whether the machine gets off the
+# ground. Its artifact is the recording.
+#
+# REACTOS IS A DIFFERENT MACHINE SHAPE FROM EVERY OTHER GUEST HERE, IN THREE WAYS AT ONCE:
+#
+#	32-bit only          the ISO is i386, and there is no amd64 ReactOS release
+#	BIOS only            it boots from the MBR through SeaBIOS; there is no UEFI loader
+#	no virtio-blk        its install disc carries no driver for it, so the disk is IDE
+#
+# SO THERE IS NO `-drive if=pflash` LINE AND NO OVMF. Those two arguments are what every other guest in
+# this repository starts with, and a walk that copied them would fail at the firmware before ReactOS
+# was ever read. `-machine pc` is the i440fx board, which is what the project's own QEMU page uses.
+#
+# THE DISK IS IDE, NOT VIRTIO, AND THAT IS A FACT ABOUT THE INSTALLER rather than a preference:
+# ReactOS 0.4.16's boot CD ships no virtio-blk driver, so a virtio target is a disk Setup cannot see.
+walkthrough "the published disk starts - nothing else"
+resolution 1024x768
+recording_resolution 1024x768
+
+step "boot the published disk"
+  boot
+    machine "pc,accel=kvm"
+    args [["-cpu", "Skylake-Client-v4"], ["-smp", "4"], ["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-device", "VGA,xres=1024,yres=768,vgamem_mb=16"], ["-device", "qemu-xhci,id=xhci"], ["-device", "usb-tablet,bus=xhci.0"], ["-device", "usb-kbd,bus=xhci.0"], ["-drive", "file=disk.qcow2,if=ide,index=0,media=disk,format=qcow2,discard=unmap"], ["-audiodev", "none,id=snd0"], ["-device", "ich9-intel-hda"], ["-device", "hda-duplex,audiodev=snd0"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "rtl8139,netdev=net0,mac=52:54:00:56:4d:01"]]
+    timeout 300
+
+# THERE IS NO `BdsDxe` LINE ON BIOS, SO THE MARKER IS THE GUEST'S OWN. SeaBIOS prints `Booting from
+# Hard Disk...` before it jumps to whatever the disk's boot sector asks for, which is the same claim
+# `BdsDxe: starting` makes under UEFI: the firmware found something and handed over.
+step "the firmware handed control to the disk"
+  until "Booting from Hard Disk"
+  from console
+  timeout 300
+
+# THREE MINUTES OF RECORDING, AND NOTHING IS READ FROM IT. Every guest draws a different boot
+# sequence, so any threshold would either be tuned to one of them or be too loose to fail.
+step "record three minutes of the boot"
+  settle 180
+
+step "stop the machine"
+  stop kill
+  timeout 120

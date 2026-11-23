@@ -132,12 +132,53 @@ jobs:
           fi
           echo "path=$dest" >> "$GITHUB_OUTPUT"
 
-      - name: pack into a tar
+      - name: decompress a `.zst` download, because no consumer can read one
         if: steps.wanted.outputs.wanted == 'yes'
-        # EVERY PUBLISHED ASSET IS ONE TAR, AND THIS IS WHERE THAT STARTS.
+        # REDOX OS PUBLISHES ITS LIVEDISK AS `.iso.zst` AND NOTHING ELSE - there is no uncompressed
+        # ISO on the project's own server. A stage that pulled the compressed file would hand qemu a
+        # zstd frame and get `Could not read from CDROM` with no explanation, and a walkthrough cannot
+        # run `unzstd` because preparation is not a guest action.
+        #
+        # SO THE DECOMPRESSION HAPPENS WHERE THE FILE IS PACKED FOR PUBLICATION. What lands in ghcr is
+        # a tar holding an ISO, which is the same shape every other guest's asset has - so `stage.yml`
+        # needs no special case and stays identical across the six repositories.
         run: |
           set -eu
           src="${{ steps.fetch.outputs.path }}"
+          case "$src" in
+            *.zst)
+              unzstd -q --rm "$src"
+              out="${src%.zst}"
+              echo "decompressed $(basename "$src") -> $(basename "$out")"
+              ;;
+            *.zip)
+              # REACTOS SHIPS ITS INSTALLER AS A ZIP, AND THE ISO INSIDE IS THE MEDIUM. The same
+              # argument as the zstd case: qemu cannot open a zip, and unpacking it is preparation.
+              #
+              # IT LANDS IN THE SAME DIRECTORY AS THE DOWNLOAD, so the pack step's `dirname` is
+              # unchanged and the tar holds one file with the name a walk would ask for.
+              dir=$(dirname "$src")
+              iso=$(unzip -Z1 "$src" '*.iso' | head -1)
+              [ -n "$iso" ] || { echo "::error::$src holds no .iso"; exit 1; }
+              unzip -q -o "$src" "$iso" -d "$dir"
+              out="$dir/$iso"
+              rm -f "$src"
+              echo "unzipped $(basename "$src") -> $iso"
+              ;;
+            *) out="$src"; echo "not compressed: $(basename "$src")" ;;
+          esac
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+        id: unpack
+
+      - name: pack into a tar
+        if: steps.wanted.outputs.wanted == 'yes'
+        # EVERY PUBLISHED ASSET IS ONE TAR, AND THIS IS WHERE THAT STARTS.
+        #
+        # IT READS `unpack`'s OUTPUT, because a compressed download was replaced by its decompressed
+        # self in the step above.
+        run: |
+          set -eu
+          src="${{ steps.unpack.outputs.path }}"
           dir=$(dirname "$src")
           base=$(basename "$src")
           case "$base" in
