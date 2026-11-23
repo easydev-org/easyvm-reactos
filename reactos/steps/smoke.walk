@@ -23,7 +23,7 @@ recording_resolution 1024x768
 step "boot the published disk"
   boot
     machine "pc,accel=kvm"
-    args [["-cpu", "Skylake-Client-v4"], ["-smp", "4"], ["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-device", "VGA,xres=1024,yres=768,vgamem_mb=16"], ["-device", "qemu-xhci,id=xhci"], ["-device", "usb-tablet,bus=xhci.0"], ["-device", "usb-kbd,bus=xhci.0"], ["-drive", "file=disk.qcow2,if=ide,index=0,media=disk,format=qcow2,discard=unmap"], ["-audiodev", "none,id=snd0"], ["-device", "ich9-intel-hda"], ["-device", "hda-duplex,audiodev=snd0"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "rtl8139,netdev=net0,mac=52:54:00:56:4d:01"]]
+    args [["-cpu", "Skylake-Client-v4"], ["-smp", "4"], ["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-device", "VGA,xres=1024,yres=768,vgamem_mb=16"], ["-device", "qemu-xhci,id=xhci"], ["-device", "usb-tablet,bus=xhci.0"], ["-device", "usb-kbd,bus=xhci.0"], ["-drive", "file={{disk}},if=ide,index=0,media=disk,format=qcow2,discard=unmap"], ["-audiodev", "none,id=snd0"], ["-device", "ich9-intel-hda"], ["-device", "hda-duplex,audiodev=snd0"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "rtl8139,netdev=net0,mac=52:54:00:56:4d:01"]]
     timeout 300
 
 # THERE IS NO `BdsDxe` LINE ON BIOS, SO THE MARKER IS THE GUEST'S OWN. SeaBIOS prints `Booting from
