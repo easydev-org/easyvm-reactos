@@ -112,7 +112,12 @@ jobs:
           name=$(basename "$URL")
           dest="$GITHUB_WORKSPACE/work/$name"
           echo "=== $name"
-          curl -fL --retry 8 --retry-delay 3 --retry-all-errors -o "$dest" "$URL"
+          # A USER AGENT THAT IS NOT curl/default AND A REFERER FROM THE PUBLISHER'S OWN SITE.
+          # MEASURED on redoxos: the same URL answers 200 through a proxy and 403 from a GitHub
+          # runner, and static.redox-os.org answers `server: cloudflare` - so the block is an
+          # edge rule against a bare curl, not a missing file. A browser-like agent and a referer
+          # are what a real visitor sends.
+          curl -fL --retry 8 --retry-delay 3 --retry-all-errors             -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"             -e "${URL%%/*}/"             -o "$dest" "$URL"
 
           # THE DIGEST IS CHECKED WHEN THE PUBLISHER GIVES ONE. ReactOS ships its installer inside a
           # SourceForge zip whose digest is not exposed as a sibling file, and the row says so with
